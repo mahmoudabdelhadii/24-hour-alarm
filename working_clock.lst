@@ -1,0 +1,851 @@
+0000              1   ; ISR_example.asm: a) Increments/decrements a BCD variable every half second using
+0000              2   ; an ISR for timer 2; b) Generates a 2kHz square wave at pin P3.7 using
+0000              3   ; an ISR for timer 0; and c) in the 'main' loop it displays the variable
+0000              4   ; incremented/decremented using the ISR for timer 2 on the LCD.  Also resets it to 
+0000              5   ; zero if the 'BOOT' pushbutton connected to P4.5 is pressed.
+                  7   $LIST
+0000              9   
+0000             10   ; There is a couple of typos in MODLP51 in the definition of the timer 0/1 reload
+0000             11   ; special function registers (SFRs), so:
+0000             12   
+0000             13   TIMER0_RELOAD_L DATA 0xf2
+0000             14   TIMER1_RELOAD_L DATA 0xf3
+0000             15   TIMER0_RELOAD_H DATA 0xf4
+0000             16   TIMER1_RELOAD_H DATA 0xf5
+0000             17   
+0000             18   CLK           EQU 22118400 ; Microcontroller system crystal frequency in Hz
+0000             19   TIMER0_RATE   EQU 4096     ; 2048Hz squarewave (peak amplitude of CEM-1203 speaker)
+0000             20   TIMER0_RELOAD EQU ((65536-(CLK/TIMER0_RATE)))
+0000             21   TIMER2_RATE   EQU 1000     ; 1000Hz, for a timer tick of 1ms
+0000             22   TIMER2_RELOAD EQU ((65536-(CLK/TIMER2_RATE)))
+0000             23   
+0000             24   BOOT_BUTTON   equ P4.5
+0000             25   ALARM_BUTTON  equ P0.7
+0000             26   SOUND_OUT     equ P3.7
+0000             27   UPDOWN        equ P0.0
+0000             28   
+0000             29   ; Reset vector
+0000             30   org 0x0000
+0000 02054C      31       ljmp main
+0003             32   
+0003             33   ; External interrupt 0 vector (not used in this code)
+0003             34   org 0x0003
+0003 32          35            reti
+0004             36   
+0004             37   ; Timer/Counter 0 overflow interrupt vector
+000B             38   org 0x000B
+000B 0200F5      39            ljmp Timer0_ISR
+000E             40   
+000E             41   ; External interrupt 1 vector (not used in this code)
+0013             42   org 0x0013
+0013 32          43            reti
+0014             44   
+0014             45   ; Timer/Counter 1 overflow interrupt vector (not used in this code)
+001B             46   org 0x001B
+001B 32          47            reti
+001C             48   
+001C             49   ; Serial port receive/transmit interrupt vector (not used in this code)
+0023             50   org 0x0023 
+0023 32          51            reti
+0024             52            
+0024             53   ; Timer/Counter 2 overflow interrupt vector
+002B             54   org 0x002B
+002B 02010F      55            ljmp Timer2_ISR
+002E             56   
+002E             57   ; In the 8051 we can define direct access variables starting at location 0x30 up to location 0x7F
+0030             58   dseg at 0x30
+0030             59   Count1ms:     ds 2 ; Used to determine when half second has passed
+0032             60   BCD_counter:  ds 1 ; The BCD counter incrememted in the ISR and displayed in the main loop
+0033             61   min_counter:  ds 1 ; minute counter
+0034             62   hour_counter: ds 1 ; hour counter
+0035             63   
+0035             64   ; In the 8051 we have variables that are 1-bit in size.  We can use the setb, clr, jb, and jnb
+0035             65   ; instructions with these variables.  This is how you define a 1-bit variable:
+0000             66   bseg
+0000             67   seconds_flag: dbit 1 ; Set to one in the ISR every time 500 ms had passed
+0001             68   daytime:      dbit 1 ; am=1, pm=0
+0002             69   
+002E             70   cseg
+002E             71   ; These 'equ' must match the wiring between the microcontroller and the LCD!
+002E             72   LCD_RS equ P1.1
+002E             73   LCD_RW equ P1.2
+002E             74   LCD_E  equ P1.3
+002E             75   LCD_D4 equ P3.2
+002E             76   LCD_D5 equ P3.3
+002E             77   LCD_D6 equ P3.4
+002E             78   LCD_D7 equ P3.5
+                 80   	$LIST
+00DC             82   
+00DC             83   ;---------------------------------;
+00DC             84   ; Routine to initialize the ISR   ;
+00DC             85   ; for timer 0                     ;
+00DC             86   ;---------------------------------;
+00DC             87   ;;ALARM NOISE
+00DC             88   Timer0_Init:
+00DC E589        89            mov a, TMOD
+00DE 54F0        90            anl a, #0xf0 ; Clear the bits for timer 0
+00E0 4401        91            orl a, #0x01 ; Configure timer 0 as 16-timer
+00E2 F589        92            mov TMOD, a
+00E4 758CEA      93            mov TH0, #high(TIMER0_RELOAD)
+00E7 758AE8      94            mov TL0, #low(TIMER0_RELOAD)
+00EA             95            ; Set autoreload value
+00EA 75F4EA      96            mov TIMER0_RELOAD_H, #high(TIMER0_RELOAD)
+00ED 75F2E8      97            mov TIMER0_RELOAD_L, #low(TIMER0_RELOAD)
+00F0             98            ; Enable the timer and interrupts
+00F0 D2A9        99       setb ET0  ; Enable timer 0 interrupt
+00F2 D28C       100       setb TR0  ; Start timer 0
+00F4 22         101            ret
+00F5            102   
+00F5            103   ;---------------------------------;
+00F5            104   ; ISR for timer 0.  Set to execute;
+00F5            105   ; every 1/4096Hz to generate a    ;
+00F5            106   ; 2048 Hz square wave at pin P3.7 ;
+00F5            107   ;---------------------------------;
+00F5            108   Timer0_ISR:
+00F5            109            ;clr TF0  ; According to the data sheet this is done for us already.
+00F5            110            ;cpl SOUND_OUT ; Connect speaker to P3.7!
+00F5 32         111            reti
+00F6            112   
+00F6            113   
+00F6            114   ;---------------------------------;
+00F6            115   ; Routine to initialize the ISR   ;
+00F6            116   ; for timer 2                     ;
+00F6            117   ;---------------------------------;
+00F6            118   ;;MAIN TIMER
+00F6            119   Timer2_Init:
+00F6 75C800     120            mov T2CON, #0 ; Stop timer/counter.  Autoreload mode.
+00F9 75CDA9     121            mov TH2, #high(TIMER2_RELOAD)
+00FC 75CC9A     122            mov TL2, #low(TIMER2_RELOAD)
+00FF            123            ; Set the reload value
+00FF 75CBA9     124            mov RCAP2H, #high(TIMER2_RELOAD)
+0102 75CA9A     125            mov RCAP2L, #low(TIMER2_RELOAD)
+0105            126            ; Init One millisecond interrupt counter.  It is a 16-bit variable made with two 8-bit parts
+0105 E4         127            clr a
+0106 F530       128            mov Count1ms+0, a
+0108 F531       129            mov Count1ms+1, a
+010A            130            ; Enable the timer and interrupts
+010A D2AD       131       setb ET2  ; Enable timer 2 interrupt
+010C D2CA       132       setb TR2  ; Enable timer 2
+010E 22         133            ret
+010F            134   
+010F            135   ;---------------------------------;
+010F            136   ; ISR for timer 2                 ;
+010F            137   ;---------------------------------;
+010F            138   Timer2_ISR:
+010F C2CF       139            clr TF2  ; Timer 2 doesn't clear TF2 automatically. Do it in ISR
+0111 B2B6       140            cpl P3.6 ; To check the interrupt rate with oscilloscope. It must be precisely a 1 ms pulse.
+0113            141            
+0113            142            ; The two registers used in the ISR must be saved in the stack
+0113 C0E0       143            push acc
+0115 C0D0       144            push psw
+0117            145            
+0117            146            ; Increment the 16-bit one mili second counter
+0117 0530       147            inc Count1ms+0    ; Increment the low 8-bits first
+0119 E530       148            mov a, Count1ms+0 ; If the low 8-bits overflow, then increment high 8-bits
+011B 7002       149            jnz Inc_Done
+011D 0531       150            inc Count1ms+1
+011F            151   
+011F            152   Inc_Done:
+011F            153            ;check if second has passed
+011F E530       154            mov a,Count1ms+0
+0121 B4E84F     155            cjne a,#low(1000),Timer2_ISR_done
+0124 E531       156            mov a,Count1ms+1
+0126 B4034A     157            cjne a,#high(1000),Timer2_ISR_done
+0129            158   
+0129            159            ;its been 1seconds so set flag
+0129 D200       160            setb seconds_flag
+012B            161            ;cpl TR0 ;makes beeping noise
+012B E4         162            clr a
+012C F530       163            mov Count1ms+0, a
+012E F531       164            mov Count1ms+1, a
+0130            165            ; Increment the BCD counter
+0130 E532       166            mov a, BCD_counter
+0132 30803C     167            jnb UPDOWN, Timer2_ISR_decrement
+0135 2401       168            add a, #0x01
+0137 D4         169            da a ; Decimal adjust instruction.  Check datasheet for more details!
+0138 F532       170            mov BCD_counter, a
+013A B40332     171            cjne a,#0x3,cont
+013D            172            
+013D            173            ;;its been 60sec
+013D C2CA       174            clr TR2                 ; Stop timer 2
+013F E4         175            clr a
+0140 F530       176            mov Count1ms+0, a
+0142 F531       177            mov Count1ms+1, a
+0144            178            ; Now clear the BCD counter
+0144 F532       179            mov BCD_counter, a
+0146 D2CA       180            setb TR2                ; Start timer 2
+0148 E533       181            mov a,min_counter
+014A 2401       182            add a,#0x1
+014C D4         183            da a    
+014D F533       184            mov min_counter,a
+014F            185            
+014F B4591D     186            cjne a,#0x59,cont
+0152            187            ;;its been an hour, reset mins and inc hour
+0152 E534       188            mov a,hour_counter
+0154 B41209     189            cjne a,#0x12,check_daytime
+0157            190            ;;its 12:59 so we clear mins normally but we reset hours to 1
+0157 E4         191            clr a
+0158 F533       192            mov min_counter,a
+015A 7401       193            mov a,#0x1
+015C F534       194            mov hour_counter,a
+015E 800F       195            sjmp cont
+0160            196            
+0160            197   check_daytime:
+0160            198            ;;check if its 11:59 for datime switch
+0160 B41102     199            cjne a,#0x11,clear_normal
+0163 B201       200            cpl daytime
+0165            201            
+0165            202   clear_normal:
+0165 E4         203            clr a
+0166 F533       204            mov min_counter,a
+0168 E534       205            mov a,hour_counter
+016A 2401       206            add a,#0x1
+016C D4         207            da a
+016D F534       208            mov hour_counter,a
+016F            209            
+016F            210   cont:    
+016F 8002       211            sjmp Timer2_ISR_done
+0171            212   
+0171            213   
+0171            214   
+0171            215   Timer2_ISR_decrement:            ;;reuse this to make it switch to alarm set display
+0171 2499       216            add a, #0x99 ; Adding the 10-complement of -1 is like subtracting 1.
+0173            217   
+0173            218   Timer2_ISR_done:
+0173 D0D0       219            pop psw
+0175 D0E0       220            pop acc
+0177 32         221            reti
+0178            222            
+0178            223   
+0178            224   ; These custom characters copied from https://cdn.instructables.com/ORIG/FGY/5J1E/GYFYDR5L/FGY5J1EGYFYDR5L.txt
+0178            225   Custom_Characters:
+0178 7440       226            mov a, #40h
+017A 120083     226            lcall ?WriteCommand ; Custom characters are stored starting at address 40h
+017D            227   ; Custom made character 0
+017D 7407       228            mov a, #00111B
+017F 12007E     228            lcall ?WriteData
+0182 740F       229            mov a, #01111B
+0184 12007E     229            lcall ?WriteData
+0187 741F       230            mov a, #11111B
+0189 12007E     230            lcall ?WriteData
+018C 741F       231            mov a, #11111B
+018E 12007E     231            lcall ?WriteData
+0191 741F       232            mov a, #11111B
+0193 12007E     232            lcall ?WriteData
+0196 741F       233            mov a, #11111B
+0198 12007E     233            lcall ?WriteData
+019B 741F       234            mov a, #11111B
+019D 12007E     234            lcall ?WriteData
+01A0 741F       235            mov a, #11111B
+01A2 12007E     235            lcall ?WriteData
+01A5            236   ; Custom made character 1
+01A5 741F       237            mov a, #11111B
+01A7 12007E     237            lcall ?WriteData
+01AA 741F       238            mov a, #11111B
+01AC 12007E     238            lcall ?WriteData
+01AF 741F       239            mov a, #11111B
+01B1 12007E     239            lcall ?WriteData
+01B4 7400       240            mov a, #00000B
+01B6 12007E     240            lcall ?WriteData
+01B9 7400       241            mov a, #00000B
+01BB 12007E     241            lcall ?WriteData
+01BE 7400       242            mov a, #00000B
+01C0 12007E     242            lcall ?WriteData
+01C3 7400       243            mov a, #00000B
+01C5 12007E     243            lcall ?WriteData
+01C8 7400       244            mov a, #00000B
+01CA 12007E     244            lcall ?WriteData
+01CD            245   ; Custom made character 2
+01CD 741C       246            mov a, #11100B
+01CF 12007E     246            lcall ?WriteData
+01D2 741E       247            mov a, #11110B
+01D4 12007E     247            lcall ?WriteData
+01D7 741F       248            mov a, #11111B
+01D9 12007E     248            lcall ?WriteData
+01DC 741F       249            mov a, #11111B
+01DE 12007E     249            lcall ?WriteData
+01E1 741F       250            mov a, #11111B
+01E3 12007E     250            lcall ?WriteData
+01E6 741F       251            mov a, #11111B
+01E8 12007E     251            lcall ?WriteData
+01EB 741F       252            mov a, #11111B
+01ED 12007E     252            lcall ?WriteData
+01F0 741F       253            mov a, #11111B
+01F2 12007E     253            lcall ?WriteData
+01F5            254   ; Custom made character 3
+01F5 741F       255            mov a, #11111B
+01F7 12007E     255            lcall ?WriteData
+01FA 741F       256            mov a, #11111B
+01FC 12007E     256            lcall ?WriteData
+01FF 741F       257            mov a, #11111B
+0201 12007E     257            lcall ?WriteData
+0204 741F       258            mov a, #11111B
+0206 12007E     258            lcall ?WriteData
+0209 741F       259            mov a, #11111B
+020B 12007E     259            lcall ?WriteData
+020E 741F       260            mov a, #11111B
+0210 12007E     260            lcall ?WriteData
+0213 740F       261            mov a, #01111B
+0215 12007E     261            lcall ?WriteData
+0218 7407       262            mov a, #00111B
+021A 12007E     262            lcall ?WriteData
+021D            263   ; Custom made character 4
+021D 7400       264            mov a, #00000B
+021F 12007E     264            lcall ?WriteData
+0222 7400       265            mov a, #00000B
+0224 12007E     265            lcall ?WriteData
+0227 7400       266            mov a, #00000B
+0229 12007E     266            lcall ?WriteData
+022C 7400       267            mov a, #00000B
+022E 12007E     267            lcall ?WriteData
+0231 7400       268            mov a, #00000B
+0233 12007E     268            lcall ?WriteData
+0236 741F       269            mov a, #11111B
+0238 12007E     269            lcall ?WriteData
+023B 741F       270            mov a, #11111B
+023D 12007E     270            lcall ?WriteData
+0240 741F       271            mov a, #11111B
+0242 12007E     271            lcall ?WriteData
+0245            272   ; Custom made character 5
+0245 741F       273            mov a, #11111B
+0247 12007E     273            lcall ?WriteData
+024A 741F       274            mov a, #11111B
+024C 12007E     274            lcall ?WriteData
+024F 741F       275            mov a, #11111B
+0251 12007E     275            lcall ?WriteData
+0254 741F       276            mov a, #11111B
+0256 12007E     276            lcall ?WriteData
+0259 741F       277            mov a, #11111B
+025B 12007E     277            lcall ?WriteData
+025E 741F       278            mov a, #11111B
+0260 12007E     278            lcall ?WriteData
+0263 741E       279            mov a, #11110B
+0265 12007E     279            lcall ?WriteData
+0268 741C       280            mov a, #11100B
+026A 12007E     280            lcall ?WriteData
+026D            281   ; Custom made character 6
+026D 741F       282            mov a, #11111B
+026F 12007E     282            lcall ?WriteData
+0272 741F       283            mov a, #11111B
+0274 12007E     283            lcall ?WriteData
+0277 741F       284            mov a, #11111B
+0279 12007E     284            lcall ?WriteData
+027C 7400       285            mov a, #00000B
+027E 12007E     285            lcall ?WriteData
+0281 7400       286            mov a, #00000B
+0283 12007E     286            lcall ?WriteData
+0286 7400       287            mov a, #00000B
+0288 12007E     287            lcall ?WriteData
+028B 741F       288            mov a, #11111B
+028D 12007E     288            lcall ?WriteData
+0290 741F       289            mov a, #11111B
+0292 12007E     289            lcall ?WriteData
+0295            290   ; Custom made character 7
+0295 741F       291            mov a, #11111B
+0297 12007E     291            lcall ?WriteData
+029A 7400       292            mov a, #00000B
+029C 12007E     292            lcall ?WriteData
+029F 7400       293            mov a, #00000B
+02A1 12007E     293            lcall ?WriteData
+02A4 7400       294            mov a, #00000B
+02A6 12007E     294            lcall ?WriteData
+02A9 7400       295            mov a, #00000B
+02AB 12007E     295            lcall ?WriteData
+02AE 741F       296            mov a, #11111B
+02B0 12007E     296            lcall ?WriteData
+02B3 741F       297            mov a, #11111B
+02B5 12007E     297            lcall ?WriteData
+02B8 741F       298            mov a, #11111B
+02BA 12007E     298            lcall ?WriteData
+02BD 22         299            ret
+02BE            300   
+02BE            301   ; For all the big numbers, the starting column is passed in register R1
+02BE            302   Draw_big_0:
+02BE E9         303            mov a, R1
+02BF 4480       304            orl a, #0x80 
+02C1 120083     305            lcall ?WriteCommand 
+02C4 7400       306            mov a, #0
+02C6 12007E     306            lcall ?WriteData  
+02C9 7401       307            mov a, #1
+02CB 12007E     307            lcall ?WriteData 
+02CE 7402       308            mov a, #2
+02D0 12007E     308            lcall ?WriteData
+02D3            309            ;WriteData(#' ')
+02D3 E9         310            mov a, R1
+02D4 44C0       311            orl a, #0xc0
+02D6 120083     312            lcall ?WriteCommand 
+02D9 7403       313            mov a, #3
+02DB 12007E     313            lcall ?WriteData  
+02DE 7404       314            mov a, #4
+02E0 12007E     314            lcall ?WriteData  
+02E3 7405       315            mov a, #5
+02E5 12007E     315            lcall ?WriteData
+02E8            316            ;WriteData(#' ')
+02E8 22         317            ret
+02E9            318            
+02E9            319   Draw_big_1:
+02E9 E9         320            mov a, R1
+02EA 4480       321            orl a, #0x80 
+02EC 120083     322            lcall ?WriteCommand 
+02EF            323   ;        WriteData(#1)
+02EF 7420       324            mov a, #' '
+02F1 12007E     324            lcall ?WriteData
+02F4 7400       325            mov a, #0
+02F6 12007E     325            lcall ?WriteData
+02F9            326            ;WriteData(#' ')
+02F9 7420       327            mov a, #' '
+02FB 12007E     327            lcall ?WriteData
+02FE E9         328            mov a, R1
+02FF 44C0       329            orl a, #0xc0
+0301 120083     330            lcall ?WriteCommand 
+0304            331   ;        WriteData(#4)
+0304 7420       332            mov a, #' '
+0306 12007E     332            lcall ?WriteData
+0309 74FF       333            mov a, #255
+030B 12007E     333            lcall ?WriteData
+030E            334   ;        WriteData(#4)
+030E 7420       335            mov a, #' '
+0310 12007E     335            lcall ?WriteData
+0313 22         336            ret
+0314            337   
+0314            338   Draw_big_2:
+0314 E9         339            mov a, R1
+0315 4480       340            orl a, #0x80 
+0317 120083     341            lcall ?WriteCommand 
+031A 7406       342            mov a, #6
+031C 12007E     342            lcall ?WriteData
+031F 7406       343            mov a, #6
+0321 12007E     343            lcall ?WriteData
+0324 7402       344            mov a, #2
+0326 12007E     344            lcall ?WriteData
+0329            345            ;WriteData(#' ')
+0329 E9         346            mov a, R1
+032A 44C0       347            orl a, #0xc0
+032C 120083     348            lcall ?WriteCommand 
+032F 7403       349            mov a, #3
+0331 12007E     349            lcall ?WriteData
+0334 7407       350            mov a, #7
+0336 12007E     350            lcall ?WriteData
+0339 7407       351            mov a, #7
+033B 12007E     351            lcall ?WriteData
+033E            352            ;WriteData(#' ')
+033E 22         353            ret
+033F            354   
+033F            355   Draw_big_3:
+033F E9         356            mov a, R1
+0340 4480       357            orl a, #0x80 
+0342 120083     358            lcall ?WriteCommand 
+0345 7406       359            mov a, #6
+0347 12007E     359            lcall ?WriteData
+034A 7406       360            mov a, #6
+034C 12007E     360            lcall ?WriteData
+034F 7402       361            mov a, #2
+0351 12007E     361            lcall ?WriteData
+0354            362            ;WriteData(#' ')
+0354 E9         363            mov a, R1
+0355 44C0       364            orl a, #0xc0
+0357 120083     365            lcall ?WriteCommand 
+035A 7407       366            mov a, #7
+035C 12007E     366            lcall ?WriteData
+035F 7407       367            mov a, #7
+0361 12007E     367            lcall ?WriteData
+0364 7405       368            mov a, #5
+0366 12007E     368            lcall ?WriteData
+0369            369            ;WriteData(#' ')
+0369 22         370            ret
+036A            371   
+036A            372   Draw_big_4:
+036A E9         373            mov a, R1
+036B 4480       374            orl a, #0x80 
+036D 120083     375            lcall ?WriteCommand 
+0370 7403       376            mov a, #3
+0372 12007E     376            lcall ?WriteData
+0375 7404       377            mov a, #4
+0377 12007E     377            lcall ?WriteData
+037A 7402       378            mov a, #2
+037C 12007E     378            lcall ?WriteData
+037F            379            ;WriteData(#' ')
+037F E9         380            mov a, R1
+0380 44C0       381            orl a, #0xc0
+0382 120083     382            lcall ?WriteCommand 
+0385 7420       383            mov a, #' '
+0387 12007E     383            lcall ?WriteData
+038A 7420       384            mov a, #' '
+038C 12007E     384            lcall ?WriteData
+038F 74FF       385            mov a, #255
+0391 12007E     385            lcall ?WriteData
+0394            386            ;WriteData(#' ')
+0394 22         387            ret
+0395            388   
+0395            389   Draw_big_5:
+0395 E9         390            mov a, R1
+0396 4480       391            orl a, #0x80 
+0398 120083     392            lcall ?WriteCommand 
+039B 74FF       393            mov a, #255
+039D 12007E     393            lcall ?WriteData
+03A0 7406       394            mov a, #6
+03A2 12007E     394            lcall ?WriteData
+03A5 7406       395            mov a, #6
+03A7 12007E     395            lcall ?WriteData
+03AA            396            ;WriteData(#' ')
+03AA E9         397            mov a, R1
+03AB 44C0       398            orl a, #0xc0
+03AD 120083     399            lcall ?WriteCommand 
+03B0 7407       400            mov a, #7
+03B2 12007E     400            lcall ?WriteData
+03B5 7407       401            mov a, #7
+03B7 12007E     401            lcall ?WriteData
+03BA 7405       402            mov a, #5
+03BC 12007E     402            lcall ?WriteData
+03BF            403            ;WriteData(#' ')
+03BF 22         404            ret
+03C0            405   
+03C0            406   Draw_big_6:
+03C0 E9         407            mov a, R1
+03C1 4480       408            orl a, #0x80 
+03C3 120083     409            lcall ?WriteCommand 
+03C6 7400       410            mov a, #0
+03C8 12007E     410            lcall ?WriteData
+03CB 7406       411            mov a, #6
+03CD 12007E     411            lcall ?WriteData
+03D0 7406       412            mov a, #6
+03D2 12007E     412            lcall ?WriteData
+03D5            413            ;WriteData(#' ')
+03D5 E9         414            mov a, R1
+03D6 44C0       415            orl a, #0xc0
+03D8 120083     416            lcall ?WriteCommand 
+03DB 7403       417            mov a, #3
+03DD 12007E     417            lcall ?WriteData
+03E0 7407       418            mov a, #7
+03E2 12007E     418            lcall ?WriteData
+03E5 7405       419            mov a, #5
+03E7 12007E     419            lcall ?WriteData
+03EA            420            ;WriteData(#' ')
+03EA 22         421            ret
+03EB            422   
+03EB            423   Draw_big_7:
+03EB E9         424            mov a, R1
+03EC 4480       425            orl a, #0x80 
+03EE 120083     426            lcall ?WriteCommand 
+03F1 7401       427            mov a, #1
+03F3 12007E     427            lcall ?WriteData
+03F6 7401       428            mov a, #1
+03F8 12007E     428            lcall ?WriteData
+03FB 7402       429            mov a, #2
+03FD 12007E     429            lcall ?WriteData
+0400            430            ;WriteData(#' ')
+0400 E9         431            mov a, R1
+0401 44C0       432            orl a, #0xc0
+0403 120083     433            lcall ?WriteCommand 
+0406 7420       434            mov a, #' '
+0408 12007E     434            lcall ?WriteData
+040B 7420       435            mov a, #' '
+040D 12007E     435            lcall ?WriteData
+0410 7400       436            mov a, #0
+0412 12007E     436            lcall ?WriteData
+0415            437            ;WriteData(#' ')
+0415 22         438            ret
+0416            439   
+0416            440   Draw_big_8:
+0416 E9         441            mov a, R1
+0417 4480       442            orl a, #0x80 
+0419 120083     443            lcall ?WriteCommand 
+041C 7400       444            mov a, #0
+041E 12007E     444            lcall ?WriteData
+0421 7406       445            mov a, #6
+0423 12007E     445            lcall ?WriteData
+0426 7402       446            mov a, #2
+0428 12007E     446            lcall ?WriteData
+042B            447            ;WriteData(#' ')
+042B E9         448            mov a, R1
+042C 44C0       449            orl a, #0xc0
+042E 120083     450            lcall ?WriteCommand 
+0431 7403       451            mov a, #3
+0433 12007E     451            lcall ?WriteData
+0436 7407       452            mov a, #7
+0438 12007E     452            lcall ?WriteData
+043B 7405       453            mov a, #5
+043D 12007E     453            lcall ?WriteData
+0440            454            ;WriteData(#' ')
+0440 22         455            ret
+0441            456   
+0441            457   Draw_big_9:
+0441 E9         458            mov a, R1
+0442 4480       459            orl a, #0x80 
+0444 120083     460            lcall ?WriteCommand 
+0447 7400       461            mov a, #0
+0449 12007E     461            lcall ?WriteData
+044C 7406       462            mov a, #6
+044E 12007E     462            lcall ?WriteData
+0451 7402       463            mov a, #2
+0453 12007E     463            lcall ?WriteData
+0456            464            ;WriteData(#' ')
+0456 E9         465            mov a, R1
+0457 44C0       466            orl a, #0xc0
+0459 120083     467            lcall ?WriteCommand 
+045C 7420       468            mov a, #' '
+045E 12007E     468            lcall ?WriteData
+0461 7420       469            mov a, #' '
+0463 12007E     469            lcall ?WriteData
+0466 74FF       470            mov a, #255
+0468 12007E     470            lcall ?WriteData
+046B            471            ;WriteData(#' ')
+046B 22         472            ret
+046C            473   
+046C            474   ; The number to display is passed in accumulator.  The column where to display the
+046C            475   ; number is passed in R1. This works only for numbers 0 to 9.
+046C            476   Display_big_number:
+046C            477            ; We need to multiply the accumulator by 3 because the jump table below uses 3 bytes
+046C            478            ; for each 'ljmp' instruction.
+046C 75F003     479            mov b, #3
+046F A4         480            mul ab
+0470 900474     481            mov dptr, #Jump_table
+0473 73         482            jmp @A+dptr
+0474            483   Jump_table:
+0474 0202BE     484            ljmp Draw_big_0 ; This instruction uses 3 bytes
+0477 0202E9     485            ljmp Draw_big_1
+047A 020314     486            ljmp Draw_big_2
+047D 02033F     487            ljmp Draw_big_3
+0480 02036A     488            ljmp Draw_big_4
+0483 020395     489            ljmp Draw_big_5
+0486 0203C0     490            ljmp Draw_big_6
+0489 0203EB     491            ljmp Draw_big_7
+048C 020416     492            ljmp Draw_big_8
+048F 020441     493            ljmp Draw_big_9
+0492            494   ; No 'ret' needed because we are counting of on the 'ret' provided by the Draw_big_x functions above
+0492            495   
+0492            496   ; Takes a BCD 2-digit number passed in the accumulator and displays it at position passed in R0
+0492            497   Display_Big_BCD:
+0492 C0E0       498            push acc
+0494            499            ; Display the most significant decimal digit
+0494 88F0       500            mov b, R0
+0496 A9F0       501            mov R1, b
+0498 C4         502            swap a
+0499 540F       503            anl a, #0x0f
+049B 12046C     504            lcall Display_big_number
+049E            505            
+049E            506            ; Display the least significant decimal digit, which starts 4 columns to the right of the most significant digit
+049E E8         507            mov a, R0
+049F 2403       508            add a, #3
+04A1 F9         509            mov R1, a
+04A2 D0E0       510            pop acc
+04A4 540F       511            anl a, #0x0f
+04A6 12046C     512            lcall Display_big_number
+04A9            513            
+04A9 22         514            ret
+04AA            515   
+04AA            516   Draw_0:
+04AA E9         517            mov a,R1
+04AB 120083     518            lcall ?WriteCommand
+04AE 7430       519            mov a,#'0'
+04B0 12007E     520            lcall ?WriteData
+04B3 22         521            ret
+04B4            522            
+04B4            523   Draw_1:
+04B4 E9         524            mov a,R1
+04B5 120083     525            lcall ?WriteCommand
+04B8 7431       526            mov a,#'1'
+04BA 12007E     527            lcall ?WriteData
+04BD 22         528            ret
+04BE            529            
+04BE            530   Draw_2:
+04BE E9         531            mov a,R1
+04BF 120083     532            lcall ?WriteCommand
+04C2 7432       533            mov a,#'2'
+04C4 12007E     534            lcall ?WriteData
+04C7 22         535            ret
+04C8            536            
+04C8            537   Draw_3:
+04C8 E9         538            mov a,R1
+04C9 120083     539            lcall ?WriteCommand
+04CC 7433       540            mov a,#'3'
+04CE 12007E     541            lcall ?WriteData
+04D1 22         542            ret
+04D2            543            
+04D2            544   Draw_4:
+04D2 E9         545            mov a,R1
+04D3 120083     546            lcall ?WriteCommand
+04D6 7434       547            mov a,#'4'
+04D8 12007E     548            lcall ?WriteData
+04DB 22         549            ret
+04DC            550            
+04DC            551   Draw_5:
+04DC E9         552            mov a,R1
+04DD 120083     553            lcall ?WriteCommand
+04E0 7435       554            mov a,#'5'
+04E2 12007E     555            lcall ?WriteData
+04E5 22         556            ret
+04E6            557            
+04E6            558   Draw_6:
+04E6 E9         559            mov a,R1
+04E7 120083     560            lcall ?WriteCommand
+04EA 7436       561            mov a,#'6'
+04EC 12007E     562            lcall ?WriteData
+04EF 22         563            ret
+04F0            564            
+04F0            565   Draw_7:
+04F0 E9         566            mov a,R1
+04F1 120083     567            lcall ?WriteCommand
+04F4 7437       568            mov a,#'7'
+04F6 12007E     569            lcall ?WriteData
+04F9 22         570            ret
+04FA            571            
+04FA            572   Draw_8:
+04FA E9         573            mov a,R1
+04FB 120083     574            lcall ?WriteCommand
+04FE 7438       575            mov a,#'8'
+0500 12007E     576            lcall ?WriteData
+0503 22         577            ret
+0504            578            
+0504            579   Draw_9:
+0504 E9         580            mov a,R1
+0505 120083     581            lcall ?WriteCommand
+0508 7439       582            mov a,#'9'
+050A 12007E     583            lcall ?WriteData
+050D 22         584            ret
+050E            585   
+050E            586   ; The number to display is passed in accumulator.  The column where to display the
+050E            587   ; number is passed in R1. This works only for numbers 0 to 9.
+050E            588   Display_number:
+050E            589            ; We need to multiply the accumulator by 3 because the jump table below uses 3 bytes
+050E            590            ; for each 'ljmp' instruction.
+050E 75F003     591            mov b, #3
+0511 A4         592            mul ab
+0512 900516     593            mov dptr, #Jump_number
+0515 73         594            jmp @A+dptr
+0516            595   Jump_number:
+0516 0204AA     596            ljmp Draw_0 ; This instruction uses 3 bytes
+0519 0204B4     597            ljmp Draw_1
+051C 0204BE     598            ljmp Draw_2
+051F 0204C8     599            ljmp Draw_3
+0522 0204D2     600            ljmp Draw_4
+0525 0204DC     601            ljmp Draw_5
+0528 0204E6     602            ljmp Draw_6
+052B 0204F0     603            ljmp Draw_7
+052E 0204FA     604            ljmp Draw_8
+0531 020504     605            ljmp Draw_9
+0534            606            
+0534            607   ; Takes a BCD 2-digit number passed in the accumulator and displays it at position passed in R0
+0534            608   Display_mini_BCD:
+0534 C0E0       609            push acc
+0536            610            ; Display the most significant decimal digit
+0536 88F0       611            mov b, R0
+0538 A9F0       612            mov R1, b
+053A C4         613            swap a
+053B 540F       614            anl a, #0x0f
+053D 12050E     615            lcall Display_number
+0540            616            
+0540            617            ; Display the least significant decimal digit, which starts 4 columns to the right of the most significant digit
+0540 E8         618            mov a, R0
+0541 2401       619            add a, #1
+0543 F9         620            mov R1, a
+0544 D0E0       621            pop acc
+0546 540F       622            anl a, #0x0f
+0548 12050E     623            lcall Display_number
+054B            624            
+054B 22         625            ret
+054C            626   
+054C            627   ;---------------------------------;
+054C            628   ; Main program. Includes hardware ;
+054C            629   ; initialization and 'forever'    ;
+054C            630   ; loop.                           ;
+054C            631   ;---------------------------------;
+054C            632   main:
+054C            633            ; Initialization
+054C 75817F     634       mov SP, #0x7F
+054F 1200DC     635       lcall Timer0_Init
+0552 1200F6     636       lcall Timer2_Init
+0555            637       ; In case you decide to use the pins of P0 configure the port in bidirectional mode:
+0555 75E600     638       mov P0M0, #0
+0558 75E700     639       mov P0M1, #0
+055B D2AF       640       setb EA   ; Enable Global interrupts
+055D 120088     641       lcall LCD_4BIT
+0560 120178     642       lcall Custom_Characters ; Custom characters are needed to display big numbers.  This call generates them.
+0563 D200       643       setb seconds_flag
+0565 C201       644       clr daytime
+0567 753200     645            mov BCD_counter, #0x00
+056A 753357     646            mov min_counter, #0x57
+056D 753411     647            mov hour_counter,#0x11
+0570            648            
+0570            649            ; After initialization the program stays in this 'forever' loop
+0570            650   loop:
+0570 20C51C     651            jb BOOT_BUTTON, loop_a  ; if the 'BOOT' button is not pressed skip
+0573 C002       652            push AR2
+0575 7A32       652            mov R2, #50
+0577 120039     652            lcall ?Wait_Milli_Seconds
+057A D002       652            pop AR2         ; Debounce delay.  This macro is also in 'LCD_4bit.inc'
+057C 20C510     653            jb BOOT_BUTTON, loop_a  ; if the 'BOOT' button is not pressed skip
+057F 30C5FD     654            jnb BOOT_BUTTON, $              ; Wait for button release.  The '$' means: jump to same instruction.
+0582            655            ; A valid press of the 'BOOT' button has been detected, reset the BCD counter.
+0582            656            ; But first stop timer 2 and reset the milli-seconds counter, to resync everything.
+0582 C2CA       657            clr TR2                 ; Stop timer 2
+0584 E4         658            clr a
+0585 F530       659            mov Count1ms+0, a
+0587 F531       660            mov Count1ms+1, a
+0589            661            ; Now clear the BCD counter
+0589 F532       662            mov BCD_counter, a
+058B D2CA       663            setb TR2                ; Start timer 2
+058D 8003       664            sjmp loop_b             ; Display the new value         
+058F            665   
+058F            666   loop_a:
+058F 3000DE     667            jnb seconds_flag,loop
+0592            668   loop_b:
+0592 C200       669            clr seconds_flag
+0594            670            
+0594 7486       671            mov a,#0x86
+0596 120083     672            lcall ?WriteCommand
+0599 742E       673            mov a,#'.'
+059B 12007E     674            lcall ?WriteData
+059E 74C6       675            mov a,#0xc6
+05A0 120083     676            lcall ?WriteCommand
+05A3 742E       677            mov a,#'.'
+05A5 12007E     678            lcall ?WriteData
+05A8            679            
+05A8            680   seconds:
+05A8 78CE       681            mov R0,#0xce
+05AA E532       682            mov a,BCD_counter
+05AC 120534     683            lcall Display_mini_BCD
+05AF 1205BB     684            lcall minutes
+05B2 1205C3     685            lcall hours
+05B5 1205CB     686            lcall daytime_set
+05B8 020570     687            ljmp loop
+05BB            688   
+05BB            689   minutes:
+05BB 7807       690            mov R0,#7
+05BD E533       691            mov a,min_counter
+05BF 120492     692            lcall Display_Big_BCD
+05C2 22         693            ret
+05C3            694            ;;;;;;
+05C3            695   hours:
+05C3 7800       696            mov R0,#0
+05C5 E534       697            mov a,hour_counter
+05C7 120492     698            lcall Display_Big_BCD
+05CA 22         699            ret
+05CB            700   
+05CB            701   daytime_set:
+05CB            702            
+05CB 300115     703            jnb daytime,display_pm
+05CE            704            ;; display am
+05CE 748E       705            mov a, #0x8e
+05D0 120083     705            lcall ?WriteCommand
+05D3 7441       706            mov a, #'A'
+05D5 12007E     706            lcall ?WriteData
+05D8 748F       707            mov a, #0x8f
+05DA 120083     707            lcall ?WriteCommand
+05DD 744D       708            mov a, #'M'
+05DF 12007E     708            lcall ?WriteData
+05E2 22         709            ret
+05E3            710            
+05E3            711   display_pm:
+05E3 748E       712            mov a, #0x8e
+05E5 120083     712            lcall ?WriteCommand
+05E8 7450       713            mov a, #'P'
+05EA 12007E     713            lcall ?WriteData
+05ED 748F       714            mov a, #0x8f
+05EF 120083     714            lcall ?WriteCommand
+05F2 744D       715            mov a, #'M'
+05F4 12007E     715            lcall ?WriteData
+05F7 22         716            ret
+05F8            717   
+05F8            718   
+05F8            719   EN
