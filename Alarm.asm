@@ -279,7 +279,7 @@ dechour:
 	
 hourjmp:	mov a, hours_count
 	add a,#0x99
-	da a
+	da a 
 	mov hours_count, a
 
 ;	add a, #0x99 ; Adding the 10-complement of -1 is like subtracting 1.
