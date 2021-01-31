@@ -10,7 +10,7 @@ $LIST
 CLK           EQU 24000000 ; Microcontroller system crystal frequency in Hz
 TIMER0_RATE   EQU 2000*2    ; The tone we want out is A mayor.  Interrupt rate must be twice as fast.
 TIMER0_RELOAD EQU ((65536-(CLK/(TIMER0_RATE))))
-TIMER2_RATE   EQU 1000    ; 1000Hz, for a timer tick of 1ms
+TIMER2_RATE   EQU 10000    ; 1000Hz, for a timer tick of 1ms
 TIMER2_RELOAD EQU ((65536-(CLK/(TIMER2_RATE))))
 
 BOOT_BUTTON   equ P3.7
@@ -253,12 +253,14 @@ Timer2_ISR_decrement:
 	;add a,#0x99
 	da a
 	mov minutes_count, a
-	ljmp dechour
+	sjmp dechour
 	
 minjmp:	mov a, minutes_count
 	add a, #0x99
 	da a
 	mov minutes_count, a
+	
+	sjmp Timer2_ISR_done
 	
 	
 dechour:
@@ -274,14 +276,24 @@ dechour:
 	mov a,#0x12
 	da a
 	mov hours_count, a
+	mov a, hours_count
+	
 	sjmp Timer2_ISR_done
 	
 	
-hourjmp:	mov a, hours_count
+hourjmp:	
+	mov a, hours_count
+	
+	
 	add a,#0x99
 	da a
+	cjne a, #0x11, skipflag
+	cpl AM_PM_flag
+	skipflag:
 	mov hours_count, a
 
+	
+	
 ;	add a, #0x99 ; Adding the 10-complement of -1 is like subtracting 1.
 	
 Timer2_ISR_done:
@@ -341,7 +353,7 @@ main:
 	clr AM_PM_flag
 	mov seconds_count, #0x02
 	mov minutes_count, #0x00
-	mov hours_count, #0x01
+	mov hours_count, #0x12
 	
 	
 	
@@ -376,9 +388,10 @@ loop_b:
 	jnb AM_PM_flag, display_AM
 		Set_Cursor(1, 10)
 		Display_char(#'A')
+		sjmp ampmdone
 	display_AM: 
 	Set_Cursor(1, 10)
 	Display_char(#'P')
-	
+	 ampmdone:
     ljmp loop
 END
