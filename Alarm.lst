@@ -83,10 +83,10 @@
      202D4D20
      20202020
      00
-00ED 414C4152    86   Alarm_meesage: db  'ALARM --:--:---M', 0
-     4D202D2D
-     3A2D2D3A
-     2D2D2D4D
+00ED 414C4152    86   Alarm_meesage: db  'ALARM--:--:-- -M', 0
+     4D2D2D3A
+     2D2D3A2D
+     2D202D4D
      00
 00FE 3239204A    87   date_message: db   '29 January 2020 ', 0
      616E7561
@@ -461,55 +461,5 @@
 0300 12007E     394            lcall ?WriteData
 0303 D0E0       394            pop acc
 0305            395             ampmdone:
-0305            396             
-0305 C0E0       397            push acc
-0307 740D       397            mov a, #13
-0309 14         397            dec a
-030A 1200BF     397            lcall ?Set_Cursor_2 ; Select column and row
-030D D0E0       397            pop acc     ; the place in the LCD where we want the BCD counter value
-030F C000       398            push ar0
-0311 A835       398            mov r0, seconds_count
-0313 1200C6     398            lcall ?Display_BCD
-0316 D000       398            pop ar0 ; This macro is also in 'LCD_4bit.inc'
-0318 C0E0       399            push acc
-031A 740A       399            mov a, #10
-031C 14         399            dec a
-031D 1200BF     399            lcall ?Set_Cursor_2 ; Select column and row
-0320 D0E0       399            pop acc
-0322 C000       400            push ar0
-0324 A834       400            mov r0, minutes_count
-0326 1200C6     400            lcall ?Display_BCD
-0329 D000       400            pop ar0
-032B C0E0       401            push acc
-032D 7407       401            mov a, #7
-032F 14         401            dec a
-0330 1200BF     401            lcall ?Set_Cursor_2 ; Select column and row
-0333 D0E0       401            pop acc
-0335 C000       402            push ar0
-0337 A833       402            mov r0, hours_count
-0339 1200C6     402            lcall ?Display_BCD
-033C D000       402            pop ar0
-033E 300415     403            jnb AM_PM_flag, display_AM2
-0341 C0E0       404            push acc
-0343 740F       404            mov a, #15
-0345 14         404            dec a
-0346 1200BF     404            lcall ?Set_Cursor_2 ; Select column and row
-0349 D0E0       404            pop acc
-034B C0E0       405            push acc
-034D 7441       405            mov a, #'A'
-034F 12007E     405            lcall ?WriteData
-0352 D0E0       405            pop acc
-0354 8013       406                    sjmp ampmdone2
-0356            407            display_AM2: 
-0356 C0E0       408            push acc
-0358 740F       408            mov a, #15
-035A 14         408            dec a
-035B 1200BF     408            lcall ?Set_Cursor_2 ; Select column and row
-035E D0E0       408            pop acc
-0360 C0E0       409            push acc
-0362 7450       409            mov a, #'P'
-0364 12007E     409            lcall ?WriteData
-0367 D0E0       409            pop acc
-0369            410             ampmdone2:
-0369 02027D     411       ljmp loop
-036C            412   END
+0305 02027D     396       ljmp loop
+0308            397   END

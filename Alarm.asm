@@ -83,7 +83,7 @@ $LIST
 
 ;                   1234567890123456    <- This helps determine the location of the counter
 Clock_message:  db '--:--:-- -M     ', 0
-Alarm_meesage: db  'ALARM --:--:---M', 0
+Alarm_meesage: db  'ALARM--:--:-- -M', 0
 date_message: db   '29 January 2020 ', 0
 ;-----------------------------------;
 ; Routine to initialize the timer 0 ;
@@ -393,20 +393,5 @@ loop_b:
 	Set_Cursor(1, 10)
 	Display_char(#'P')
 	 ampmdone:
-	 
-	 Set_Cursor(2, 13)     ; the place in the LCD where we want the BCD counter value
-	Display_BCD(seconds_count) ; This macro is also in 'LCD_4bit.inc'
-	Set_Cursor(2, 10)
-	Display_BCD(minutes_count)
-	Set_Cursor(2, 7)
-	Display_BCD(hours_count)
-	jnb AM_PM_flag, display_AM2
-		Set_Cursor(2, 15)
-		Display_char(#'A')
-		sjmp ampmdone2
-	display_AM2: 
-	Set_Cursor(2, 15)
-	Display_char(#'P')
-	 ampmdone2:
     ljmp loop
 END
