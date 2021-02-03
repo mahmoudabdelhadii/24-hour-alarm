@@ -10,16 +10,17 @@ $LIST
 CLK           EQU 24000000 ; Microcontroller system crystal frequency in Hz
 TIMER0_RATE   EQU 2000*2    ; The tone we want out is A mayor.  Interrupt rate must be twice as fast.
 TIMER0_RELOAD EQU ((65536-(CLK/(TIMER0_RATE))))
-TIMER2_RATE   EQU 10000    ; 1000Hz, for a timer tick of 1ms
+TIMER2_RATE   EQU 100    ; 1000Hz, for a timer tick of 1ms
 TIMER2_RELOAD EQU ((65536-(CLK/(TIMER2_RATE))))
 
 BOOT_BUTTON   equ P3.7
 SOUND_OUT     equ P2.1
-date_button        equ P3.3
-UPDOWN       equ	p0.0
-HOURBUTTON    equ p2.6
-MINUTEBUTTON  equ p2.4
-SECONDBUTTON  equ p2.2
+;clearalarm    equ P3.3
+UPDOWN        equ p3.1  ; minute dec for clock
+downhour	equ p3.3  ;hour dec for clock
+downalarm     equ p2.4
+upalarm       equ p2.2
+clearalarm  equ p0.0
 ;ALARMBUTTON   equ p3.3
 
 ; Reset vector
@@ -53,20 +54,26 @@ org 0x002B
 ; In the 8051 we can define direct access variables starting at location 0x30 up to location 0x7F
 dseg at 0x30
 Count1ms:     ds 2 ; Used to determine when half second has passed
-BCD_counter:  ds 1 ; The BCD counter incrememted in the ISR and displayed in the main loop
+;BCD_counter:  ds 1 ; The BCD counter incrememted in the ISR and displayed in the main loop
 hours_count: ds 1
 minutes_count: ds 1
 seconds_count: ds 1
+
+ahours_count: ds 1
+aminutes_count: ds 1
+aseconds_count: ds 1
+
 
 ; In the 8051 we have variables that are 1-bit in size.  We can use the setb, clr, jb, and jnb
 ; instructions with these variables.  This is how you define a 1-bit variable:
 bseg
 half_seconds_flag: dbit 1 ; Set to one in the ISR every time 500 ms had passed
-second_flag: dbit 1
-minute_flag: dbit 1
-hour_flag: dbit 1
+
 AM_PM_flag: dbit 1
 alarm_flag: dbit 1
+AM_PM_flagalarm: dbit 1
+
+buttonpress: dbit 1
 
 cseg
 ; These 'equ' must match the wiring between the microcontroller and the LCD!
@@ -83,8 +90,8 @@ $LIST
 
 ;                   1234567890123456    <- This helps determine the location of the counter
 Clock_message:  db '--:--:-- -M     ', 0
-Alarm_meesage: db  'ALARM--:--:-- -M', 0
-date_message: db   '29 January 2020 ', 0
+Alarm_meesage: db  'ALARM --:-- -M', 0
+date_message: db   '01 february 2020 ', 0
 ;-----------------------------------;
 ; Routine to initialize the timer 0 ;
 ;-----------------------------------;
@@ -110,8 +117,12 @@ Timer0_ISR:
 	clr TR0
 	mov TH0, #high(TIMER0_RELOAD)
 	mov TL0, #low(TIMER0_RELOAD)
+	
+	
+	jnb alarm_flag, noalarm2
 	setb TR0
 	cpl SOUND_OUT ; Toggle the pin connected to the speaker
+	noalarm2:
 	reti
 
 ;---------------------------------;
@@ -153,23 +164,32 @@ Timer2_ISR:
 Inc_Done:
 	; Check if half second has passed
 	mov a, Count1ms+0
-	cjne a, #low(500), Timer2_ISR_doneinterm ; Warning: this instruction changes the carry flag!
+	cjne a, #low(500), Timer2_ISR_doneinterm2 ; Warning: this instruction changes the carry flag!
 	mov a, Count1ms+1
-	cjne a, #high(500), Timer2_ISR_doneinterm
+	cjne a, #high(500), Timer2_ISR_doneinterm2
 	
 	; 500 milliseconds have passed.  Set a flag so the main program knows
+	
 	setb half_seconds_flag ; Let the main program know half second had passed
+	clr SOUND_OUT
 	cpl TR0 ; Enable/disable timer/counter 0. This line creates a beep-silence-beep-silence sound.
 	setb SOUND_OUT
 	; Reset to zero the milli-seconds counter, it is a 16-bit variable
+	
+	
 	clr a
 	mov Count1ms+0, a
 	mov Count1ms+1, a
 	
+	;;;;;;ALARM START
+	jnb upalarm, alarm_inc2
+	jnb downalarm, alarm_dec2
+	;;;;;;;;;;;;;;;;;;;;;;;;;;;;;ALARM DONE
 
 	seconds:
 	mov 	a, 	seconds_count
 	jnb UPDOWN, Timer2_ISR_decrement
+	jnb downhour, dechour
 	add     a, #0x01;
              ; reset second, increment minute
     da 		a
@@ -193,11 +213,8 @@ Inc_Done:
              ; reset second, increment minute
     da 		a
     mov 	minutes_count,    a
-	; Increment the BCD counter
-	
-	;;da a ; Decimal adjust instruction.  Check datasheet for more details!
 	mov minutes_count, a
-	cjne 	a, 	#0x60,     Timer2_ISR_done
+	cjne 	a, 	#0x60,     Timer2_ISR_doneinterm
 	
 	hours:
 	mov a,hours_count
@@ -206,7 +223,7 @@ Inc_Done:
 	mov minutes_count,a
 	mov a,#0x1
 	mov hours_count,a
-	sjmp Timer2_ISR_done
+	sjmp Timer2_ISR_doneinterm
 	
 	AM_PM:
 	mov a,hours_count
@@ -221,36 +238,19 @@ Inc_Done:
              ; reset second, increment minute
     da 		a
     mov 	hours_count,    a
-	; Increment the BCD counter
-	
+    
 	sjmp  Timer2_ISR_doneinterm
+Timer2_ISR_doneinterm2: ljmp Timer2_ISR_doneinterm
+alarm_inc2: ljmp alarm_inc
+alarm_dec2: ljmp alarm_dec
 
+
+	
 Timer2_ISR_decrement:
-
-
-	mov a, seconds_count
-	cjne a, #0x00, secjmp
-	mov a, #0x59
-	da a ; Decimal adjust instruction.  Check datasheet for more details!
-	mov seconds_count, a
-	sjmp minutedec
-
-	secjmp:mov a, seconds_count
-	add a, #0x99
-	da a
-	mov seconds_count, a
-	
-	
- 
- Timer2_ISR_doneinterm: ljmp Timer2_ISR_done
- 
- 
- minutedec:
+minutedec:
 	mov a, minutes_count
 	cjne a,#0x00, minjmp
-	
 	mov a, #0x59
-	;add a,#0x99
 	da a
 	mov minutes_count, a
 	sjmp dechour
@@ -259,18 +259,38 @@ minjmp:	mov a, minutes_count
 	add a, #0x99
 	da a
 	mov minutes_count, a
-	
-	sjmp Timer2_ISR_done
-	
-	
-dechour:
+	sjmp Timer2_ISR_doneinterm
+
 ;	mov a, seconds_count
-;	cjne a, #0x00, Timer2_ISR_done
-	
-;	mov a, minutes_count
-;	cjne a, #0x00 ,Timer2_ISR_done
+;	cjne a, #0x00, secjmp
+;	mov a, #0x59
+;	da a ; Decimal adjust instruction.  Check datasheet for more details!
+;	mov seconds_count, a
+;	sjmp minutedec
+;	secjmp:mov a, seconds_count
+;	add a, #0x99
+;	da a
+;	mov seconds_count, a
 	
 
+ Timer2_ISR_doneinterm: ljmp Timer2_ISR_done
+ seconds2: ljmp seconds
+ 
+ ;minutedec:
+	;mov a, minutes_count
+	;cjne a,#0x00, minjmp
+	;mov a, #0x59
+	;da a
+	;mov minutes_count, a
+	;sjmp Timer2_ISR_doneinterm
+	
+;minjmp:	mov a, minutes_count
+	;add a, #0x99
+	;da a
+	;mov minutes_count, a
+	;sjmp Timer2_ISR_doneinterm
+	
+dechour:
 	mov a, hours_count
 	cjne a, #0x01, hourjmp
 	mov a,#0x12
@@ -278,24 +298,94 @@ dechour:
 	mov hours_count, a
 	mov a, hours_count
 	
-	sjmp Timer2_ISR_done
+	sjmp Timer2_ISR_doneinterm
 	
 	
 hourjmp:	
 	mov a, hours_count
-	
-	
+
 	add a,#0x99
 	da a
 	cjne a, #0x11, skipflag
 	cpl AM_PM_flag
 	skipflag:
 	mov hours_count, a
+	sjmp Timer2_ISR_doneinterm
+	
+alarm_inc:
 
+	mov a, aminutes_count
+	cjne a,#0x59, minjmp3
+	mov a, #0x00
+	da a
+	mov aminutes_count, a
+	sjmp dechour3
 	
+minjmp3:	
+	mov a, aminutes_count
+	add a, #0x01
+	da a
+	mov aminutes_count, a
+	sjmp seconds2
 	
-;	add a, #0x99 ; Adding the 10-complement of -1 is like subtracting 1.
+dechour3:
+	mov a, ahours_count
+	cjne a, #0x12, hourjmp3
+	mov a,#0x01
+	da a
+	mov ahours_count, a
+	mov a, ahours_count
 	
+	sjmp Timer2_ISR_doneinterm
+	
+	seconds3: ljmp seconds2
+hourjmp3:	
+	mov a, ahours_count
+
+	add a,#0x01
+	da a
+	cjne a, #0x12, skipflag3
+	cpl AM_PM_flagalarm
+	skipflag3:
+	mov ahours_count, a
+	sjmp seconds2
+
+
+
+alarm_dec:
+	dechour5:
+	mov a, ahours_count
+	cjne a, #0x12, hourjmp5
+	mov a,#0x01
+	da a
+	mov ahours_count, a
+	mov a, ahours_count
+	
+	sjmp Timer2_ISR_doneinterm
+	
+hourjmp5:	
+	mov a, ahours_count
+
+	add a,#0x01
+	da a
+	cjne a, #0x12, skipflag5
+	cpl AM_PM_flagalarm
+	skipflag5:
+	mov ahours_count, a
+	sjmp seconds2
+
+	mov a, seconds_count
+	cjne a, #0x59, secjmp2
+	clr a
+	da a ; Decimal adjust instruction.  Check datasheet for more details!
+	mov seconds_count, a
+	sjmp seconds3
+	secjmp2:mov a, seconds_count
+	add a, #0x01
+	da a
+	mov seconds_count, a
+
+ 
 Timer2_ISR_done:
 	pop psw
 	pop acc
@@ -351,14 +441,23 @@ main:
     Send_Constant_String(#Alarm_meesage)
     setb half_seconds_flag
 	clr AM_PM_flag
-	mov seconds_count, #0x02
-	mov minutes_count, #0x00
-	mov hours_count, #0x12
+	mov seconds_count, #0x53
+	mov minutes_count, #0x58
+	mov hours_count, #0x11
+	
+	clr alarm_flag
+	
+	mov aminutes_count, #0x59
+	mov ahours_count, #0x11
+	clr AM_PM_flagalarm
+	
+	
 	
 	
 	
 	; After initialization the program stays in this 'forever' loop
 loop:
+	
 	jb BOOT_BUTTON, loop_a  ; if the 'BOOT' button is not pressed skip
 	Wait_Milli_Seconds(#50)	; Debounce delay.  This macro is also in 'LCD_4bit.inc'
 	jb BOOT_BUTTON, loop_a  ; if the 'BOOT' button is not pressed skip
@@ -372,13 +471,58 @@ loop:
 	; Now clear the BCD counter
 	mov seconds_count, a
 	setb TR2                ; Start timer 2
+	
+	
 	sjmp loop_b             ; Display the new value
 	
 	
+	clr half_seconds_flag ; We clear this flag in the main loop, but it is set in the ISR for timer 2
+    
+    
 loop_a:
+	
 	jnb half_seconds_flag, loop
+	
 loop_b:
-    clr half_seconds_flag ; We clear this flag in the main loop, but it is set in the ISR for timer 2
+	
+	mov a, minutes_count
+	mov b, aminutes_count
+	cjne a, b, clearflag
+	mov a,hours_count
+	mov b,ahours_count
+	cjne a, b, clearflag
+	
+	jb AM_PM_flag,test1
+	jb AM_PM_flagalarm,not_equal
+	sjmp equal
+	
+
+	test1: jnb AM_PM_flagalarm, not_equal
+	sjmp equal
+	
+	equal: 
+	;jb alarm_flag, clearflag
+	setb alarm_flag
+	sjmp alarmdonedone
+	not_equal:
+	sjmp clearflag 
+	
+
+	clearflag: 
+	clr alarm_flag
+	
+ 
+	alarmdonedone:
+	
+	jb clearalarm, loop_c  ; if the 'BOOT' button is not pressed skip
+	Wait_Milli_Seconds(#50)	; Debounce delay.  This macro is also in 'LCD_4bit.inc'
+	jb clearalarm, loop_c  ; if the 'BOOT' button is not pressed skip
+	jnb clearalarm, $		; Wait for button release.  The '$' means: jump to same instruction.
+
+	clr alarm_flag
+
+loop_c:
+	
 	Set_Cursor(1, 7)     ; the place in the LCD where we want the BCD counter value
 	Display_BCD(seconds_count) ; This macro is also in 'LCD_4bit.inc'
 	Set_Cursor(1, 4)
@@ -393,5 +537,19 @@ loop_b:
 	Set_Cursor(1, 10)
 	Display_char(#'P')
 	 ampmdone:
+	 
+	 
+	Set_Cursor(2, 10)
+	Display_BCD(aminutes_count)
+	Set_Cursor(2, 7)
+	Display_BCD(ahours_count)
+	jnb AM_PM_flagalarm, display_AM2
+		Set_Cursor(2, 13)
+		Display_char(#'A')
+		sjmp ampmdone2
+	display_AM2: 
+	Set_Cursor(2, 13)
+	Display_char(#'P')
+	 ampmdone2:
     ljmp loop
 END
