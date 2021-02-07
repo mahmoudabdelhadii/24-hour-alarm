@@ -63,6 +63,8 @@ ahours_count: ds 1
 aminutes_count: ds 1
 aseconds_count: ds 1
 
+time20sec: ds 1
+
 
 ; In the 8051 we have variables that are 1-bit in size.  We can use the setb, clr, jb, and jnb
 ; instructions with these variables.  This is how you define a 1-bit variable:
@@ -74,6 +76,7 @@ alarm_flag: dbit 1
 AM_PM_flagalarm: dbit 1
 
 buttonpress: dbit 1
+time20secf: dbit 1
 
 cseg
 ; These 'equ' must match the wiring between the microcontroller and the LCD!
@@ -117,7 +120,6 @@ Timer0_ISR:
 	clr TR0
 	mov TH0, #high(TIMER0_RELOAD)
 	mov TL0, #low(TIMER0_RELOAD)
-	
 	
 	jnb alarm_flag, noalarm2
 	setb TR0
@@ -244,8 +246,6 @@ Timer2_ISR_doneinterm2: ljmp Timer2_ISR_doneinterm
 alarm_inc2: ljmp alarm_inc
 alarm_dec2: ljmp alarm_dec
 
-
-	
 Timer2_ISR_decrement:
 minutedec:
 	mov a, minutes_count
@@ -458,6 +458,7 @@ main:
 	; After initialization the program stays in this 'forever' loop
 loop:
 	
+	
 	jb BOOT_BUTTON, loop_a  ; if the 'BOOT' button is not pressed skip
 	Wait_Milli_Seconds(#50)	; Debounce delay.  This macro is also in 'LCD_4bit.inc'
 	jb BOOT_BUTTON, loop_a  ; if the 'BOOT' button is not pressed skip
@@ -485,6 +486,16 @@ loop_a:
 	
 loop_b:
 	
+	
+	
+	jb clearalarm, loop_c  ; if the 'BOOT' button is not pressed skip
+	Wait_Milli_Seconds(#50)	; Debounce delay.  This macro is also in 'LCD_4bit.inc'
+	jb clearalarm, loop_c  ; if the 'BOOT' button is not pressed skip
+	jnb clearalarm, $		; Wait for button release.  The '$' means: jump to same instruction.
+
+	clr alarm_flag
+
+loop_c:
 	mov a, minutes_count
 	mov b, aminutes_count
 	cjne a, b, clearflag
@@ -502,7 +513,12 @@ loop_b:
 	
 	equal: 
 	;jb alarm_flag, clearflag
+	
 	setb alarm_flag
+	mov a, seconds_count
+	cjne a, #0x30, alarmdonedone
+	sjmp clearflag
+	
 	sjmp alarmdonedone
 	not_equal:
 	sjmp clearflag 
@@ -513,16 +529,6 @@ loop_b:
 	
  
 	alarmdonedone:
-	
-	jb clearalarm, loop_c  ; if the 'BOOT' button is not pressed skip
-	Wait_Milli_Seconds(#50)	; Debounce delay.  This macro is also in 'LCD_4bit.inc'
-	jb clearalarm, loop_c  ; if the 'BOOT' button is not pressed skip
-	jnb clearalarm, $		; Wait for button release.  The '$' means: jump to same instruction.
-
-	clr alarm_flag
-
-loop_c:
-	
 	Set_Cursor(1, 7)     ; the place in the LCD where we want the BCD counter value
 	Display_BCD(seconds_count) ; This macro is also in 'LCD_4bit.inc'
 	Set_Cursor(1, 4)
